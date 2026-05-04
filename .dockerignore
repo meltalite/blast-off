@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+backend/public
+backend/sessions
+.git
+.gitignore
+.env
+.env.*
+.claude
+*.md

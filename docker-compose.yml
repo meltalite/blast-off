@@ -1,0 +1,14 @@
+services:
+  mila-wa:
+    build: .
+    image: mila-wa:latest
+    container_name: mila-wa
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3001}:3001"
+    environment:
+      PORT: 3001
+      WA_ADMIN_USER: ${WA_ADMIN_USER:?set in .env}
+      WA_ADMIN_PASS: ${WA_ADMIN_PASS:?set in .env}
+    volumes:
+      - ./sessions:/app/sessions
