@@ -249,6 +249,23 @@ export async function sendMessage(
   };
 }
 
+export type Presence =
+  | "available"
+  | "unavailable"
+  | "composing"
+  | "recording"
+  | "paused";
+
+export async function sendPresence(jid: string | undefined, presence: Presence): Promise<void> {
+  if (!sock) throw new Error("WhatsApp not connected");
+  await sock.sendPresenceUpdate(presence, jid);
+}
+
+export async function subscribePresence(jid: string): Promise<void> {
+  if (!sock) throw new Error("WhatsApp not connected");
+  await sock.presenceSubscribe(jid);
+}
+
 function resolveDisplayName(jid: string, chatName?: string | null): string {
   if (chatName && chatName !== jid) return chatName;
   const name = lookupName(jid);
