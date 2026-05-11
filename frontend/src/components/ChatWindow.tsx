@@ -13,29 +13,103 @@ interface Message {
   status?: number; // 1=pending,2=server,3=delivered,4=read
 }
 
+const THUMB_SIZE = 240;
+
 function MediaContent({ message: m }: { message: Message }) {
   const mediaUrl = `/api/media/${encodeURIComponent(m.jid)}/${m.id}`;
+  const [expanded, setExpanded] = useState(false);
+  const caption = m.text ? (
+    <div style={{ fontSize: 14, whiteSpace: "pre-wrap", marginTop: 4 }}>{m.text}</div>
+  ) : null;
+
   if (m.mediaType === "image") {
     return (
       <div>
         <img
           src={mediaUrl}
           alt={m.text || "Photo"}
-          style={{ maxWidth: "100%", borderRadius: 8, display: "block", marginBottom: m.text ? 4 : 0 }}
+          onClick={() => setExpanded((v) => !v)}
+          style={
+            expanded
+              ? { maxWidth: "100%", borderRadius: 8, display: "block", cursor: "zoom-out" }
+              : {
+                  width: THUMB_SIZE,
+                  height: THUMB_SIZE,
+                  objectFit: "cover",
+                  borderRadius: 8,
+                  display: "block",
+                  cursor: "zoom-in",
+                }
+          }
         />
-        {m.text && <div style={{ fontSize: 14, whiteSpace: "pre-wrap" }}>{m.text}</div>}
+        {caption}
       </div>
     );
   }
   if (m.mediaType === "video") {
+    if (!expanded) {
+      return (
+        <div>
+          <div
+            onClick={() => setExpanded(true)}
+            style={{
+              width: THUMB_SIZE,
+              height: THUMB_SIZE,
+              position: "relative",
+              cursor: "pointer",
+              borderRadius: 8,
+              overflow: "hidden",
+              background: "#000",
+            }}
+          >
+            <video
+              src={`${mediaUrl}#t=0.1`}
+              preload="metadata"
+              muted
+              playsInline
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+            />
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(0,0,0,0.25)",
+              }}
+            >
+              <div
+                style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: "50%",
+                  background: "rgba(0,0,0,0.6)",
+                  color: "#fff",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 20,
+                  paddingLeft: 4,
+                }}
+              >
+                ▶
+              </div>
+            </div>
+          </div>
+          {caption}
+        </div>
+      );
+    }
     return (
       <div>
         <video
           src={mediaUrl}
           controls
-          style={{ maxWidth: "100%", borderRadius: 8, display: "block", marginBottom: m.text ? 4 : 0 }}
+          autoPlay
+          style={{ maxWidth: "100%", borderRadius: 8, display: "block" }}
         />
-        {m.text && <div style={{ fontSize: 14, whiteSpace: "pre-wrap" }}>{m.text}</div>}
+        {caption}
       </div>
     );
   }
@@ -78,7 +152,9 @@ export default function ChatWindow({ jid, name, authHeader }: Props) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [pendingImage, setPendingImage] = useState<{ dataUrl: string; mime: string } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!jid) return;
@@ -122,23 +198,68 @@ export default function ChatWindow({ jid, name, authHeader }: Props) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const readFileAsDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+
+  const attachImage = async (file: File) => {
+    if (!file.type.startsWith("image/")) return;
+    const dataUrl = await readFileAsDataUrl(file);
+    setPendingImage({ dataUrl, mime: file.type });
+  };
+
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.kind === "file" && item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          await attachImage(file);
+          return;
+        }
+      }
+    }
+  };
+
+  const handleFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) await attachImage(file);
+    e.target.value = "";
+  };
+
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!jid || !draft.trim() || sending) return;
+    if (!jid || sending) return;
+    if (!pendingImage && !draft.trim()) return;
     setSending(true);
     setSendError(null);
     const text = draft.trim();
+    const image = pendingImage;
     setDraft("");
+    setPendingImage(null);
     try {
-      const res = await fetch("/api/messages/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: authHeader },
-        body: JSON.stringify({ jid, text }),
-      });
+      const res = image
+        ? await fetch("/api/messages/send-image", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({ jid, caption: text, imageBase64: image.dataUrl }),
+          })
+        : await fetch("/api/messages/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({ jid, text }),
+          });
       const data = await res.json();
       if (!res.ok) {
         setSendError(data.error ?? "Failed to send");
-        setDraft(text); // restore draft
+        setDraft(text);
+        if (image) setPendingImage(image);
         return;
       }
       setMessages((prev) => {
@@ -148,6 +269,7 @@ export default function ChatWindow({ jid, name, authHeader }: Props) {
     } catch {
       setSendError("Network error");
       setDraft(text);
+      if (image) setPendingImage(image);
     } finally {
       setSending(false);
     }
@@ -193,12 +315,43 @@ export default function ChatWindow({ jid, name, authHeader }: Props) {
         <div ref={bottomRef} />
       </div>
       {sendError && <div style={styles.errorBar}>{sendError}</div>}
+      {pendingImage && (
+        <div style={styles.previewBar}>
+          <img src={pendingImage.dataUrl} alt="Pending" style={styles.previewImg} />
+          <span style={styles.previewLabel}>Image attached — press Send</span>
+          <button
+            type="button"
+            onClick={() => setPendingImage(null)}
+            style={styles.previewRemove}
+            aria-label="Remove image"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <form onSubmit={send} style={styles.form}>
         <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={handleFilePick}
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          style={styles.attachBtn}
+          aria-label="Attach image"
+          title="Attach image"
+        >
+          📎
+        </button>
+        <input
           style={styles.input}
-          placeholder="Type a message…"
+          placeholder={pendingImage ? "Add a caption…" : "Type a message… (paste an image to attach)"}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          onPaste={handlePaste}
         />
         <button style={{ ...styles.sendBtn, opacity: sending ? 0.6 : 1 }} type="submit" disabled={sending}>
           {sending ? "…" : "Send"}
@@ -239,5 +392,22 @@ const styles: Record<string, React.CSSProperties> = {
   sendBtn: {
     padding: "0.6rem 1.2rem", borderRadius: 24, border: "none",
     background: "#128c7e", color: "#fff", fontWeight: 600, cursor: "pointer", fontSize: 14,
+  },
+  attachBtn: {
+    padding: "0.4rem 0.7rem", borderRadius: 24, border: "none",
+    background: "transparent", cursor: "pointer", fontSize: 18, lineHeight: 1,
+  },
+  previewBar: {
+    display: "flex", alignItems: "center", gap: "0.6rem",
+    padding: "0.5rem 1rem", background: "#f7f7f7", borderTop: "1px solid #e5e7eb",
+  },
+  previewImg: {
+    width: 56, height: 56, objectFit: "cover", borderRadius: 6,
+    border: "1px solid #e5e7eb",
+  },
+  previewLabel: { flex: 1, fontSize: 13, color: "#4b5563" },
+  previewRemove: {
+    border: "none", background: "transparent", cursor: "pointer",
+    fontSize: 16, color: "#6b7280", padding: "0.25rem 0.5rem",
   },
 };

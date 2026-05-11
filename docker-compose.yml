@@ -12,3 +12,4 @@ services:
       WA_ADMIN_PASS: ${WA_ADMIN_PASS:?set in .env}
     volumes:
       - ./sessions:/app/sessions
+

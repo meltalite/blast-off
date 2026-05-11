@@ -1,10 +1,49 @@
 import { Router } from "express";
-import { getStoreStats, resetSession, startWhatsApp } from "../whatsapp";
+import {
+  getStoreStats,
+  resetSession,
+  startWhatsApp,
+  listAliases,
+  setAlias,
+  removeAlias,
+  getRawChats,
+} from "../whatsapp";
 
 const router = Router();
 
 router.get("/store", (_req, res) => {
   res.json(getStoreStats());
+});
+
+router.get("/raw-chats", (_req, res) => {
+  res.json(getRawChats());
+});
+
+router.get("/aliases", (_req, res) => {
+  res.json(listAliases());
+});
+
+router.post("/aliases", (req, res) => {
+  const { lid, jid } = req.body as { lid?: string; jid?: string };
+  if (!lid || !jid) {
+    res.status(400).json({ error: "lid and jid are required" });
+    return;
+  }
+  if (!lid.endsWith("@lid")) {
+    res.status(400).json({ error: "lid must end in @lid" });
+    return;
+  }
+  if (!jid.endsWith("@s.whatsapp.net")) {
+    res.status(400).json({ error: "jid must end in @s.whatsapp.net" });
+    return;
+  }
+  setAlias(lid, jid);
+  res.json({ ok: true, aliases: listAliases() });
+});
+
+router.delete("/aliases/:lid", (req, res) => {
+  removeAlias(decodeURIComponent(req.params.lid));
+  res.json({ ok: true, aliases: listAliases() });
 });
 
 router.post("/reset-session", async (_req, res) => {
